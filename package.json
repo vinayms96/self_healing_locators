@@ -1,0 +1,19 @@
+{
+  "name": "demo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {},
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
+    "@openrouter/sdk": "^0.12.79",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  }
+}

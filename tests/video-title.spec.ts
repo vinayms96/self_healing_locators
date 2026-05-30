@@ -13,7 +13,7 @@ test.describe('Test with normal locators', async () => {
 
         await page.goto('https://www.icc-cricket.com/');
         await homepage.video_menu.click();
-        await videos.hero_video.first().click();
+        await videos.hero_video_normal.first().click();
         await expect(videoPlayer.video_player).toHaveText('Suryakumar Yadav relives India\'s historic triumph | T20WC 2026');
     });
 

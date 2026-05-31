@@ -1,0 +1,10 @@
+[
+  {
+    "originalLocator": ".hero-rapper .swiper-wrapper a",
+    "alternateLocatorType": "locator",
+    "alternateLocatorArgs": [
+      ".hero-wrapper .swiper-wrapper a"
+    ],
+    "cachedTime": "2026-05-31T09:36:35.152Z"
+  }
+]

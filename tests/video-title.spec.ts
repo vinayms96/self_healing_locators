@@ -19,7 +19,7 @@ test.describe("Test with normal locators", async () => {
         );
     });
 
-    test.only("Test with self healing locators", async ({ page }) => {
+    test("Test with self healing locators", async ({ page }) => {
         const locatorSelector = new LocatorSelector(page);
         const homepage = new Homepage(page);
         const videos = new Videos(page);

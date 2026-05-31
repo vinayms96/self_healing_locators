@@ -2,12 +2,18 @@ import { Locator, Page } from "@playwright/test";
 import { callAnthropicAi } from "../llms/callAnthropicAi";
 import { AiProvider } from "../config/providers";
 import { callOpenRouterAi } from "../llms/callOpenRouterAi";
-import 'dotenv/config';
+import "dotenv/config";
+import { buildLocatorFromAiOutput } from "./build-locator";
+import { cacheAlternateLocator } from "../caching/cache-locator";
 
-const provider = process.env['DEFAULT_PROVIDER'];
+const provider = process.env["DEFAULT_PROVIDER"];
 
 // Building the prompt and calling the LLM models for new locator
-export async function locatorHealer(page: Page, originalLocator: Locator, pageSource: string): Promise<Locator> {
+export async function healLocatorByCallingLlmModel(
+    page: Page,
+    originalLocator: Locator,
+    pageSource: string,
+): Promise<Locator> {
     const prompt = `
         You are a QA lead automation engineer. A Playwright locator has broken or changed. Using the originalLocator as context and pageSource as the current HTML, find the correct updated locator.
 
@@ -28,34 +34,35 @@ export async function locatorHealer(page: Page, originalLocator: Locator, pageSo
         - Prefer CSS selectors with stable class names or unique attributes over text-based matching.
         - Use { exact: true } when matching by text, label, or name to avoid partial matches.
 
-        Respond with ONLY JSON, no other text:
+        Respond with ONLY PURE JSON, no other text or quotes:
         {
-            "locatorType": "getByRole",
-            "locatorArgs": ["button", { "name": "Sign in" }]
+          "locatorType": "getByRole",
+          "locatorArgs": ["button", { "name": "Sign in" }]
         }
     `;
 
     let response;
 
     try {
-        if (provider === AiProvider.OPENROUTER) response = await callOpenRouterAi(prompt);
-        if (provider === AiProvider.ANTHROPIC) response = await callAnthropicAi(prompt);
+        if (provider === AiProvider.OPENROUTER)
+            response = await callOpenRouterAi(prompt);
+        if (provider === AiProvider.ANTHROPIC)
+            response = await callAnthropicAi(prompt);
     } catch (err) {
-        throw new Error(`AI provider call failed [${provider}]: ${(err as Error).message}`);
+        throw new Error(
+            `AI provider call failed [${provider}]: ${(err as Error).message}`,
+        );
     }
 
-    if (!response) throw new Error(`AI returned empty response [provider: ${provider}]`);
-    return locatorBuilder(page, response);
-}
+    if (!response)
+        throw new Error(`AI returned empty response [provider: ${provider}]`);
+    console.log(response);
 
-// Build the locator from the JSON returned by the AI response
-async function locatorBuilder(page: Page, aiResponse: string): Promise<Locator> {
-    console.log(aiResponse);
-    const { locatorType, locatorArgs } = JSON.parse(aiResponse);
-    const builtLocator = (page as any)[locatorType](...locatorArgs);
+    // Cache the new alternate locator found by LLM models
+    cacheAlternateLocator(originalLocator, response);
 
-    console.log(builtLocator);
-    return builtLocator;
+    // Return the new alternate locator found by LLM models
+    return buildLocatorFromAiOutput(page, response);
 }
 
 const promptMyVersion = `
@@ -121,4 +128,4 @@ const promptMyVersion = `
         "locatorType": "getByRole",
         "locatorArgs": ["button", { "name": "Sign in" }]
     }
-`
+`;

@@ -1,7 +1,7 @@
-import { Page } from '@playwright/test';
+import { Page } from "@playwright/test";
 
-const HERO_VIDEO_NORMAL = '.hero-wrapper .swiper-wrapper a'
-const HERO_VIDEO = '.hero-rapper .swiper-wrapper a'
+const HERO_VIDEO_NORMAL = ".hero-wrapper .swiper-wrapper a";
+const HERO_VIDEO = ".hero-rapper .swiper-wrapper a";
 
 export class Videos {
     readonly hero_video;

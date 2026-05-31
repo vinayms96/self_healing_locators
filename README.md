@@ -5,24 +5,48 @@ Playwright test framework that automatically repairs broken locators using AI. W
 ## How It Works
 
 ```
-Test runs locator
-       |
-       v
-  Found in DOM? ──yes──> use it
-       |
-      no
-       |
-       v
-  Extract HTML block from page
-       |
-       v
-  Send to LLM (Anthropic / OpenRouter)
-       |
-       v
-  LLM returns corrected locator as JSON
-       |
-       v
-  Build Playwright Locator and continue test
+┌─────────────────────────┐
+│     Test runs locator   │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐        ┌─────────────────┐
+│     Found in DOM?       │──yes──▶│   Use locator   │
+└────────────┬────────────┘        └─────────────────┘
+             │ no
+             ▼
+┌─────────────────────────┐        ┌──────────────────────────┐
+│    Found in cache?      │──yes──▶│  Build from cache & use  │
+└────────────┬────────────┘        └──────────────────────────┘
+             │ no
+             ▼
+┌─────────────────────────┐
+│  Extract HTML from page │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│  Send to LLM            │
+│  (Anthropic/OpenRouter) │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│  LLM returns            │
+│  { locatorType, args }  │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│  Save to cache          │
+│  cached-locators.json   │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│  Build Playwright       │
+│  Locator & continue     │
+└─────────────────────────┘
 ```
 
 ## Stack
@@ -39,23 +63,29 @@ Test runs locator
 ```
 self_healing_locators/
 ├── ai-space/
+│   ├── caching/
+│   │   ├── cache-locator.ts    # Builds cache entry from Locator + AI response
+│   │   └── cache-read-write.ts # Read/write/find operations on the cache JSON
 │   ├── config/
-│   │   ├── models.ts          # LLM model constants (Anthropic + OpenRouter)
-│   │   └── providers.ts       # AiProvider enum
+│   │   ├── models.ts           # LLM model constants (Anthropic + OpenRouter)
+│   │   └── providers.ts        # AiProvider enum
+│   ├── fixtures/
+│   │   └── cached-locators.json# Persistent cache of healed locators
 │   ├── handlers/
-│   │   ├── locatorSelector.ts # Orchestrates DOM check → AI fallback
-│   │   └── locator-heal.ts    # Builds prompt, calls LLM, parses response
+│   │   ├── build-locator.ts    # Builds Playwright Locator from AI or cache entry
+│   │   ├── heal-locator.ts     # Builds prompt, calls LLM, triggers cache write
+│   │   └── locator-selector.ts # Orchestrates DOM check → cache → AI fallback
 │   └── llms/
-│       ├── callAnthropicAi.ts # Anthropic SDK call
-│       └── callOpenRouterAi.ts# OpenRouter SDK call
-├── pages/                     # Page Object Model
+│       ├── callAnthropicAi.ts  # Anthropic SDK call
+│       └── callOpenRouterAi.ts # OpenRouter SDK call
+├── pages/                      # Page Object Model
 │   ├── homepage.page.ts
 │   ├── videos.page.ts
-│   └── video_player.page.ts
+│   └── video-player.page.ts
 ├── tests/
-│   └── video-title.spec.ts    # Tests with and without self-healing
+│   └── video-title.spec.ts     # Tests with and without self-healing
 ├── playwright.config.ts
-└── .env                       # API keys and provider config (not committed)
+└── .env                        # API keys and provider config (not committed)
 ```
 
 ## Setup
@@ -98,8 +128,9 @@ await (await locatorSelector.findLocator(homepage.video_menu, 'body nav')).click
 
 `findLocator` logic:
 1. Tries the original locator with a 5s timeout
-2. If not found, extracts innerHTML of the scope block and sends to LLM
-3. LLM responds with JSON `{ locatorType, locatorArgs }` — built into a live Playwright `Locator`
+2. If not found, checks `cached-locators.json` for a previously healed locator
+3. If no cache hit, extracts innerHTML of the scope block and sends to LLM
+4. LLM responds with JSON `{ locatorType, locatorArgs }` — written to cache, then built into a live Playwright `Locator`
 
 ## AI Providers
 
@@ -120,6 +151,47 @@ Switch provider via `DEFAULT_PROVIDER` in `.env`.
 | `DEEPSEEK_V4_FLASH` | deepseek/deepseek-v4-flash |
 | `OPENAI_GPT_OSS_120B` | openai/gpt-oss-120b:free |
 | `GOOGLE_GEMMA4_31B` | google/gemma-4-31b-it:free |
+
+## Caching
+
+Healed locators are stored in `ai-space/fixtures/cached-locators.json`. Each entry:
+
+```json
+{
+  "originalLocator": ".hero-rapper .swiper-wrapper a",
+  "alternateLocatorType": "locator",
+  "alternateLocatorArgs": [".hero-wrapper .swiper-wrapper a"],
+  "cachedTime": "2026-05-31T09:29:49.518Z"
+}
+```
+
+- On match, the cache is updated (upsert by `originalLocator`)
+- Skips the LLM call entirely on subsequent runs — faster and cheaper
+
+### Cache in CI/CD
+
+Add to your GitHub Actions workflow to persist the cache across runs:
+
+```yaml
+- name: Restore locator cache
+  uses: actions/cache@v4
+  with:
+    path: ai-space/fixtures/cached-locators.json
+    key: locator-cache-${{ runner.os }}-${{ github.run_id }}
+    restore-keys: |
+      locator-cache-${{ runner.os }}-
+
+- name: Run tests
+  run: npx playwright test
+
+- name: Save locator cache
+  uses: actions/cache@v4
+  with:
+    path: ai-space/fixtures/cached-locators.json
+    key: locator-cache-${{ runner.os }}-${{ github.run_id }}
+```
+
+Cache duration: 7 days since last access (GitHub default).
 
 ## CI
 

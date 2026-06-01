@@ -8,7 +8,7 @@ export type CacheEntry = {
     cachedTime: string;
 };
 
-const filePath = "ai-space/fixtures/cached-locators.json";
+const filePath = "fixtures/cached-locators.json";
 
 // Read locators from cache if already exists
 export function readFromCache(): CacheEntry[] {

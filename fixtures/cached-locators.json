@@ -1,0 +1,10 @@
+[
+  {
+    "originalLocator": "#login-butto",
+    "alternateLocatorType": "locator",
+    "alternateLocatorArgs": [
+      "#login-button"
+    ],
+    "cachedTime": "2026-06-01T19:53:40.355Z"
+  }
+]

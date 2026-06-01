@@ -55,7 +55,7 @@ Playwright test framework that automatically repairs broken locators using AI. W
 |---|---|
 | Test framework | Playwright 1.60, TypeScript |
 | AI providers | Anthropic SDK, OpenRouter SDK |
-| Target app | [icc-cricket.com](https://www.icc-cricket.com) |
+| Target app | [saucedemo.com](https://www.saucedemo.com) |
 | CI | GitHub Actions |
 
 ## Project Structure
@@ -65,12 +65,11 @@ self_healing_locators/
 ├── ai-space/
 │   ├── caching/
 │   │   ├── cache-locator.ts    # Builds cache entry from Locator + AI response
-│   │   └── cache-read-write.ts # Read/write/find operations on the cache JSON
+│   │   ├── cache-read-write.ts # Read/write/find operations on the cache JSON
+│   │   └── conversion.ts       # Toon encode/decode helpers for cache serialization
 │   ├── config/
 │   │   ├── models.ts           # LLM model constants (Anthropic + OpenRouter)
 │   │   └── providers.ts        # AiProvider enum
-│   ├── fixtures/
-│   │   └── cached-locators.json# Persistent cache of healed locators
 │   ├── handlers/
 │   │   ├── build-locator.ts    # Builds Playwright Locator from AI or cache entry
 │   │   ├── heal-locator.ts     # Builds prompt, calls LLM, triggers cache write
@@ -78,12 +77,19 @@ self_healing_locators/
 │   └── llms/
 │       ├── callAnthropicAi.ts  # Anthropic SDK call
 │       └── callOpenRouterAi.ts # OpenRouter SDK call
+├── data/
+│   └── user_data.ts            # Test user accounts and payment info constants
+├── fixtures/
+│   ├── cached-locators.json    # Persistent cache of healed locators
+│   └── login-page.ts           # Custom fixture: auto-login before / logout after each test
 ├── pages/                      # Page Object Model
-│   ├── homepage.page.ts
-│   ├── videos.page.ts
-│   └── video-player.page.ts
+│   ├── login.page.ts           # Login page interactions
+│   └── listing.page.ts         # Inventory listing page interactions
 ├── tests/
-│   └── video-title.spec.ts     # Tests with and without self-healing
+│   ├── login.spec.ts           # Login and logout tests
+│   └── listing.spec.ts         # Inventory listing, sorting, and pricing tests
+├── utils/
+│   └── credentials.ts          # Reads SAUCE_DEMO_PASSWORD env var, looks up username by type
 ├── playwright.config.ts
 └── .env                        # API keys and provider config (not committed)
 ```
@@ -99,8 +105,10 @@ Create `.env`:
 
 ```env
 DEFAULT_PROVIDER=ANTHROPIC        # or OPENROUTER
+DEFAULT_MODEL=SONNET_4_6          # model constant key from ai-space/config/models.ts
 ANTHROPIC_API_KEY=sk-ant-...
 OPENROUTER_API_KEY=sk-or-...
+SAUCE_DEMO_PASSWORD=secret_sauce  # saucedemo test password
 ```
 
 ## Run Tests
@@ -108,7 +116,8 @@ OPENROUTER_API_KEY=sk-or-...
 ```bash
 npx playwright test                          # all tests (headless)
 npx playwright test --headed                 # with browser visible
-npx playwright test tests/video-title.spec.ts
+npx playwright test tests/login.spec.ts      # login tests only
+npx playwright test tests/listing.spec.ts    # inventory listing tests only
 npx playwright show-report                   # open HTML report
 ```
 
@@ -120,10 +129,10 @@ Wrap any locator with `LocatorSelector.findLocator()`. Pass an optional CSS scop
 const locatorSelector = new LocatorSelector(page);
 
 // Without self-healing
-await homepage.video_menu.click();
+await loginPage.username.fill('standard_user');
 
 // With self-healing — falls back to AI if locator breaks
-await (await locatorSelector.findLocator(homepage.video_menu, 'body nav')).click();
+await (await locatorSelector.findLocator(loginPage.username, '#login_button_container')).fill('standard_user');
 ```
 
 `findLocator` logic:
@@ -131,6 +140,33 @@ await (await locatorSelector.findLocator(homepage.video_menu, 'body nav')).click
 2. If not found, checks `cached-locators.json` for a previously healed locator
 3. If no cache hit, extracts innerHTML of the scope block and sends to LLM
 4. LLM responds with JSON `{ locatorType, locatorArgs }` — written to cache, then built into a live Playwright `Locator`
+
+## Test Fixtures & Credentials
+
+Tests that require an authenticated session import from `fixtures/login-page.ts` instead of `@playwright/test`:
+
+```typescript
+import { test, expect } from '../fixtures/login-page';
+
+test('my test', async ({ loginPage, page }) => {
+    // user is already logged in — starts on /inventory.html
+    // logout happens automatically after the test
+});
+```
+
+The fixture navigates to `/`, logs in using `standard_user` credentials, asserts the redirect to `/inventory.html`, then logs out after the test completes.
+
+User accounts are defined in `data/user_data.ts`. Retrieve credentials via `utils/credentials.ts`:
+
+```typescript
+import { getUserCredentials } from '../utils/credentials';
+
+const creds = getUserCredentials('standard_user');
+// creds.username → 'standard_user'
+// creds.password → process.env.SAUCE_DEMO_PASSWORD
+```
+
+Available user types: `standard_user`, `locked_out_user`, `problem_user`, `performance_glitch_user`, `error_user`, `visual_user`.
 
 ## AI Providers
 
@@ -140,9 +176,11 @@ Switch provider via `DEFAULT_PROVIDER` in `.env`.
 
 | Constant | Model ID |
 |---|---|
+| `OPUS_4_7` | claude-opus-4-7 |
+| `OPUS_4_6` | claude-opus-4-6 |
+| `OPUS_4_5` | claude-opus-4-5-20251101 |
 | `SONNET_4_6` | claude-sonnet-4-6 |
 | `HAIKU_4_5` | claude-haiku-4-5-20251001 |
-| `OPUS_4_5` | claude-opus-4-5-20251101 |
 
 **OpenRouter free models:**
 
@@ -154,7 +192,7 @@ Switch provider via `DEFAULT_PROVIDER` in `.env`.
 
 ## Caching
 
-Healed locators are stored in `ai-space/fixtures/cached-locators.json`. Each entry:
+Healed locators are stored in `fixtures/cached-locators.json`. Each entry:
 
 ```json
 {
@@ -176,7 +214,7 @@ Add to your GitHub Actions workflow to persist the cache across runs:
 - name: Restore locator cache
   uses: actions/cache@v4
   with:
-    path: ai-space/fixtures/cached-locators.json
+    path: fixtures/cached-locators.json
     key: locator-cache-${{ runner.os }}-${{ github.run_id }}
     restore-keys: |
       locator-cache-${{ runner.os }}-
@@ -187,7 +225,7 @@ Add to your GitHub Actions workflow to persist the cache across runs:
 - name: Save locator cache
   uses: actions/cache@v4
   with:
-    path: ai-space/fixtures/cached-locators.json
+    path: fixtures/cached-locators.json
     key: locator-cache-${{ runner.os }}-${{ github.run_id }}
 ```
 
@@ -195,6 +233,30 @@ Cache duration: 7 days since last access (GitHub default).
 
 ## CI
 
-GitHub Actions runs on push to `main`/`master`. Playwright report uploaded as artifact (30-day retention).
+GitHub Actions runs on push to `main`/`master`. Uses the `qa` environment, Node.js 24, 60-minute timeout. Playwright report uploaded as artifact (30-day retention).
 
-Secrets required: `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` + `DEFAULT_PROVIDER`.
+Config differences between local and CI:
+
+| Setting | Local | CI |
+|---|---|---|
+| Workers | unlimited (parallel) | 1 (serial) |
+| Retries | 0 | 2 |
+| `fullyParallel` | false | false |
+| Video | on | on |
+| Screenshot | on | on |
+| Trace | on first retry | on first retry |
+
+**GitHub Secrets** (sensitive values):
+
+| Secret | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic SDK auth |
+| `OPENROUTER_API_KEY` | OpenRouter SDK auth |
+| `SAUCE_DEMO_PASSWORD` | SauceDemo test password |
+
+**GitHub Vars** (non-sensitive config, set under environment `qa`):
+
+| Var | Purpose |
+|---|---|
+| `DEFAULT_PROVIDER` | `ANTHROPIC` or `OPENROUTER` |
+| `DEFAULT_MODEL` | Model constant key (e.g. `SONNET_4_6`) |
